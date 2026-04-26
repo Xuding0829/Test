@@ -1,0 +1,9 @@
+# Qwen2-VL 多模态微调依赖
+transformers>=4.46.0
+peft>=0.13.0
+accelerate>=1.1.0
+datasets>=2.18.0
+qwen-vl-utils>=0.0.8
+modelscope>=1.18.0
+torch>=2.0.0
+tensorboard  # 可选，用于可视化训练过程
