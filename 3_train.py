@@ -192,10 +192,13 @@ def main():
 
     model = Qwen2VLForConditionalGeneration.from_pretrained(
         MODEL_PATH,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch.float16,
         trust_remote_code=True,
     )
+    if not torch.cuda.is_available():
+        print("❌ 错误: 未检测到 CUDA，当前脚本需要在 NVIDIA GPU 环境运行。")
+        return
+    model = model.to("cuda")
     model.enable_input_require_grads()
     model.config.use_cache = False
     print("✅ 模型加载完成")
@@ -279,6 +282,15 @@ def main():
         else:
             print(f"[debug] {key}: {type(value)}", flush=True)
     print("[debug] single batch test done", flush=True)
+
+    print("[debug] start single forward test", flush=True)
+    forward_batch = {
+        key: value.to("cuda") if torch.is_tensor(value) else value
+        for key, value in debug_batch.items()
+    }
+    with torch.cuda.amp.autocast(dtype=torch.float16):
+        forward_outputs = peft_model(**forward_batch)
+    print(f"[debug] single forward test done, loss={forward_outputs.loss.item():.6f}", flush=True)
 
     trainer.train()
 
