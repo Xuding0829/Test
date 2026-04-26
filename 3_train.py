@@ -3,11 +3,13 @@
 RTX 3090 (24GB) 优化配置
 """
 import os
+import time
 
 import torch
 from datasets import Dataset
 from peft import LoraConfig, TaskType, get_peft_model
 from PIL import Image
+from torch.utils.data import DataLoader
 from transformers import (
     AutoProcessor,
     AutoTokenizer,
@@ -52,11 +54,14 @@ class MultiModalDataCollator:
         ]
 
     def __call__(self, features):
+        batch_start = time.time()
+        print(f"[collator] start, batch_size={len(features)}", flush=True)
         full_texts = []
         prompt_texts = []
         images = []
 
-        for example in features:
+        for idx, example in enumerate(features):
+            sample_start = time.time()
             user_messages = self.build_user_message(example)
             full_messages = user_messages + [
                 {
@@ -82,19 +87,35 @@ class MultiModalDataCollator:
 
             with Image.open(example["image_path"]) as img:
                 images.append(img.convert("RGB"))
+            print(
+                f"[collator] sample {idx} prepared in {time.time() - sample_start:.2f}s",
+                flush=True,
+            )
 
+        full_processor_start = time.time()
+        print("[collator] calling processor for full batch", flush=True)
         batch = self.processor(
             text=full_texts,
             images=images,
             padding=True,
             return_tensors="pt",
         )
+        print(
+            f"[collator] full batch processor done in {time.time() - full_processor_start:.2f}s",
+            flush=True,
+        )
 
+        prompt_processor_start = time.time()
+        print("[collator] calling processor for prompt batch", flush=True)
         prompt_batch = self.processor(
             text=prompt_texts,
             images=images,
             padding=True,
             return_tensors="pt",
+        )
+        print(
+            f"[collator] prompt batch processor done in {time.time() - prompt_processor_start:.2f}s",
+            flush=True,
         )
 
         labels = batch["input_ids"].clone()
@@ -105,6 +126,10 @@ class MultiModalDataCollator:
             labels[idx, :prompt_len] = -100
 
         batch["labels"] = labels
+        for key, value in batch.items():
+            if hasattr(value, "shape"):
+                print(f"[collator] {key} shape={tuple(value.shape)}", flush=True)
+        print(f"[collator] done in {time.time() - batch_start:.2f}s", flush=True)
         return batch
 
 
@@ -239,6 +264,21 @@ def main():
         eval_dataset=val_dataset,
         data_collator=MultiModalDataCollator(processor=processor),
     )
+
+    print("[debug] start single batch test", flush=True)
+    debug_loader = DataLoader(
+        train_dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=MultiModalDataCollator(processor=processor),
+    )
+    debug_batch = next(iter(debug_loader))
+    for key, value in debug_batch.items():
+        if hasattr(value, "shape"):
+            print(f"[debug] {key}: {tuple(value.shape)}", flush=True)
+        else:
+            print(f"[debug] {key}: {type(value)}", flush=True)
+    print("[debug] single batch test done", flush=True)
 
     trainer.train()
 
