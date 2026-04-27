@@ -1,6 +1,6 @@
 """
 步骤5：单张图片推理演示
-使用微调后的模型对图片进行问答
+使用微调后的模型对任意茶叶图片进行问答
 """
 import os
 
@@ -44,7 +44,7 @@ def resolve_lora_path():
 
 
 def load_model():
-    """加载模型"""
+    """加载微调模型"""
     print("加载模型...")
     lora_path = resolve_lora_path()
     if not lora_path:
@@ -60,8 +60,8 @@ def load_model():
         task_type=TaskType.CAUSAL_LM,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         inference_mode=True,
-        r=32,
-        lora_alpha=32,
+        r=4,
+        lora_alpha=8,
         lora_dropout=0.05,
         bias="none",
     )
@@ -115,7 +115,8 @@ def main():
     print("=" * 60)
 
     if not resolve_lora_path():
-        print(f"❌ 错误: 找不到 LoRA 模型，当前输出目录为 {OUTPUT_DIR}")
+        print(f"\n❌ 错误: 找不到 LoRA 模型")
+        print(f"输出目录: {OUTPUT_DIR}")
         print("请先完成训练，或在脚本顶部手动设置 LORA_PATH")
         return
 
@@ -125,25 +126,26 @@ def main():
     # 交互式问答
     print("\n" + "=" * 60)
     print("问答模式：输入图片路径和问题，或按 Ctrl+C 退出")
+    print("默认问题: 这张茶叶图片显示了什么病害？")
     print("=" * 60)
 
     while True:
         try:
-            image_path = input("\n图片路径: ").strip()
+            image_path = input("\n📷 图片路径: ").strip()
             if not image_path:
                 continue
             if not os.path.exists(image_path):
                 print(f"❌ 文件不存在: {image_path}")
                 continue
 
-            question = input("问题: ").strip()
-            if not question:
-                continue
+            question_input = input("❓ 问题 (回车使用默认): ").strip()
+            if not question_input:
+                question_input = "这张茶叶图片显示了什么病害？"
 
-            print("推理中...")
-            answer = answer_question(image_path, question, model, processor)
+            print("🤔 推理中...")
+            answer = answer_question(image_path, question_input, model, processor)
 
-            print(f"\n回答: {answer}\n")
+            print(f"\n💬 回答: {answer}\n")
             print("-" * 40)
 
         except KeyboardInterrupt:

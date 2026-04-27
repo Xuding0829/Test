@@ -1,5 +1,6 @@
 """
 步骤4：评估微调后的模型
+使用验证集对微调模型进行简单准确率评估
 """
 import os
 import re
@@ -22,12 +23,14 @@ def resolve_lora_path():
     if LORA_PATH:
         return LORA_PATH
 
+    # 检查是否有 adapter_config.json (merge 后的最终模型)
     if os.path.exists(os.path.join(OUTPUT_DIR, "adapter_config.json")):
         return OUTPUT_DIR
 
     if not os.path.isdir(OUTPUT_DIR):
         return None
 
+    # 选择 step 最大的 checkpoint
     checkpoint_dirs = []
     for name in os.listdir(OUTPUT_DIR):
         if not name.startswith("checkpoint-"):
@@ -46,10 +49,12 @@ def resolve_lora_path():
 
 
 def normalize_text(text):
+    """去除标点空格，转小写，便于比较"""
     return re.sub(r"\s+", "", re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9]", "", text or "")).lower()
 
 
 def is_prediction_match(pred_answer, true_answer):
+    """宽松匹配：包含关系或字符重叠度 >= 60%"""
     pred = normalize_text(pred_answer)
     truth = normalize_text(true_answer)
     if not pred or not truth:
@@ -89,17 +94,18 @@ def main():
     lora_path = resolve_lora_path()
 
     if not lora_path or not os.path.exists(lora_path):
-        print(f"❌ 错误: 找不到 LoRA 模型，当前输出目录为 {OUTPUT_DIR}")
+        print(f"\n❌ 错误: 找不到 LoRA 模型")
+        print(f"输出目录: {OUTPUT_DIR}")
         print("请先完成训练，或在脚本顶部手动设置 LORA_PATH")
         return
 
     if not os.path.exists(VAL_DATA):
-        print(f"❌ 错误: 找不到验证数据 {VAL_DATA}")
-        print("请先运行 python 2_convert_data.py 转换数据")
+        print(f"\n❌ 错误: 找不到验证数据 {VAL_DATA}")
+        print("请先运行: python 2_convert_data.py")
         return
 
     # 加载模型
-    print("\n[1/3] 加载模型...")
+    print(f"\n[1/3] 加载模型...")
     base_model = Qwen2VLForConditionalGeneration.from_pretrained(
         MODEL_PATH, torch_dtype=torch.bfloat16, device_map="auto"
     )
@@ -108,28 +114,27 @@ def main():
         task_type=TaskType.CAUSAL_LM,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         inference_mode=True,
-        r=32,
-        lora_alpha=32,
+        r=4,
+        lora_alpha=8,
         lora_dropout=0.05,
         bias="none",
     )
 
     model = PeftModel.from_pretrained(base_model, lora_path, config=config)
     processor = AutoProcessor.from_pretrained(MODEL_PATH)
-    print("✅ 模型加载完成")
-    print(f"使用 LoRA: {lora_path}")
+    print(f"✅ 模型加载完成 (LoRA: {lora_path})")
 
     # 加载验证数据
-    print("\n[2/3] 加载验证数据...")
+    print(f"\n[2/3] 加载验证数据...")
     val_ds = Dataset.from_json(VAL_DATA)
     print(f"验证样本数: {len(val_ds)}")
 
     # 评估
-    print("\n[3/3] 开始评估...")
+    print(f"\n[3/3] 开始评估（最多 20 个样本）...")
     print("-" * 60)
 
     correct = 0
-    total = min(len(val_ds), 20)  # 最多评估20个样本
+    total = min(len(val_ds), 20)
 
     for i in range(total):
         sample = val_ds[i]
@@ -150,16 +155,16 @@ def main():
 
         pred_answer = predict(model, processor, messages)
 
-        # 简单匹配：预测中是否包含真实答案的关键词
+        # 简单匹配
         is_correct = is_prediction_match(pred_answer, true_answer)
         if is_correct:
             correct += 1
 
         print(f"\n[{i+1}/{total}]")
-        print(f"问题: {question}")
-        print(f"真实回答: {true_answer[:50]}...")
-        print(f"预测回答: {pred_answer[:50]}...")
-        print(f"结果: {'✅ 正确' if is_correct else '❌ 错误'}")
+        print(f"  问题: {question}")
+        print(f"  真实: {true_answer[:50]}...")
+        print(f"  预测: {pred_answer[:50]}...")
+        print(f"  结果: {'✅ 正确' if is_correct else '❌ 错误'}")
 
     print("\n" + "=" * 60)
     print(f"准确率: {correct}/{total} = {correct/total*100:.1f}%")
